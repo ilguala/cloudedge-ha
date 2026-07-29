@@ -1,5 +1,9 @@
 """Constants for the CloudEdge integration."""
 
+import logging
+
+_LOGGER = logging.getLogger(__name__)
+
 DOMAIN = "cloudedge"
 
 # Configuration keys
@@ -274,14 +278,41 @@ SENSOR_UNIT_DECIBEL = "dB"
 # This has to run before any CloudEdgeClient call. const.py is imported by
 # both __init__.py and config_flow.py, so it is the earliest common point and
 # covers the login performed during the config flow as well.
+# Setting an attribute the library does not read fails SILENTLY: Python simply
+# creates a new one, the library keeps its own default, and the login comes back
+# as resultCode 1017 with nothing in the logs to explain why. That already cost
+# one debugging round, so rather than assuming a set of names: apply whichever
+# name the installed library actually declares, and complain loudly when a
+# parameter cannot be applied at all.
+#
+# The alternatives exist because upstream names these APP_VERSION /
+# APP_VERSION_CODE, while an earlier revision of the patched fork used APP_VER /
+# APP_VER_CODE. Accepting both means the library and this integration can be
+# updated in any order instead of having to move in lockstep.
+_MEARI_BRAND_PARAMETERS = (
+    ("sourceApp", ("SOURCE_APP",), "82"),
+    ("appVersion", ("APP_VERSION", "APP_VER"), "6.1.1"),
+    ("appVersionCode", ("APP_VERSION_CODE", "APP_VER_CODE"), "611"),
+    ("partnerId", ("PARTNER_ID",), "82"),
+    ("p2pBrand", ("P2P_BRAND",), "82"),
+    ("p2pAppVersion", ("P2P_APP_VER",), "6.1.1a8.0.0"),
+)
+
 try:
     from cloudedge import constants as _meari_constants
 except ImportError:  # requirement not installed yet — nothing to override
     pass
 else:
-    _meari_constants.SOURCE_APP = "82"
-    _meari_constants.APP_VER = "6.1.1"
-    _meari_constants.APP_VER_CODE = "611"
-    _meari_constants.PARTNER_ID = "82"
-    _meari_constants.P2P_BRAND = "82"
-    _meari_constants.P2P_APP_VER = "6.1.1a8.0.0"
+    for _label, _candidate_names, _value in _MEARI_BRAND_PARAMETERS:
+        for _name in _candidate_names:
+            if hasattr(_meari_constants, _name):
+                setattr(_meari_constants, _name, _value)
+                break
+        else:
+            _LOGGER.error(
+                "Cococam brand parameter %s was not applied: none of %s exist in "
+                "pycloudedge.constants. Login will fail with resultCode 1017 "
+                "until this is fixed",
+                _label,
+                ", ".join(_candidate_names),
+            )
