@@ -15,7 +15,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    PTZ_DEFAULT_DURATION,
+    PTZ_DIRECTIONS,
+    PTZ_ICONS,
+)
 
 if TYPE_CHECKING:
     from . import CloudEdgeCoordinator
@@ -46,6 +51,20 @@ async def async_setup_entry(
                 device_data,
             )
         )
+
+        # One PTZ nudge button per direction. The camera model is not a reliable
+        # indicator of whether a motor is fitted, and the vendor app shows its
+        # D-pad for every camera too, so the buttons are always created: on a
+        # fixed camera a press simply does nothing.
+        for direction in PTZ_DIRECTIONS:
+            buttons.append(
+                CloudEdgePtzButton(
+                    coordinator,
+                    device_sn,
+                    device_data,
+                    direction,
+                )
+            )
 
     async_add_entities(buttons)
 
@@ -141,3 +160,68 @@ class CloudEdgeRefreshButton(CoordinatorEntity, ButtonEntity):
             # Reset timestamp on error so user knows the refresh failed
             self._last_refresh = None
             self.async_write_ha_state()
+
+
+class CloudEdgePtzButton(CoordinatorEntity, ButtonEntity):
+    """Button entity that nudges the camera in one direction."""
+
+    def __init__(
+        self,
+        coordinator,
+        device_sn: str,
+        device_data: Dict[str, Any],
+        direction: str,
+    ) -> None:
+        """Initialize a PTZ direction button."""
+        super().__init__(coordinator)
+        self._device_sn = device_sn
+        self._device_data = device_data
+        self._device_name = device_data.get("name", "Unknown Device")
+        self._direction = direction
+
+        self._attr_name = f"{self._device_name} PTZ {direction}"
+        self._attr_unique_id = f"{device_sn}_ptz_{direction}"
+        self._attr_icon = PTZ_ICONS[direction]
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self._device_sn)},
+            "name": self._device_name,
+            "manufacturer": "CloudEdge",
+            "model": self._device_data.get("type", "SmartEye Camera"),
+            "serial_number": self._device_sn,
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return (
+            self.coordinator.last_update_success
+            and self._device_sn in self.coordinator.data
+        )
+
+    async def async_press(self) -> None:
+        """Move the camera for the default nudge duration."""
+        _LOGGER.debug(
+            f"PTZ {self._direction} nudge on {self._device_name}"
+        )
+        try:
+            # blocking: the service holds the motor for the nudge duration and
+            # only returns once it has issued the stop, so a rapid double press
+            # cannot leave two moves overlapping
+            await self.hass.services.async_call(
+                DOMAIN,
+                "ptz",
+                {
+                    "device_name": self._device_name,
+                    "direction": self._direction,
+                    "duration": PTZ_DEFAULT_DURATION,
+                },
+                blocking=True,
+            )
+        except Exception as e:
+            _LOGGER.error(
+                f"Error moving {self._device_name} {self._direction}: {e}"
+            )

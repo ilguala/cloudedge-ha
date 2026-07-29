@@ -1,6 +1,8 @@
 """Services for CloudEdge integration."""
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from typing import Any
 
@@ -9,7 +11,16 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    PTZ_DEFAULT_DURATION,
+    PTZ_DIRECTIONS,
+    PTZ_MAX_DURATION,
+    PTZ_MIN_DURATION,
+    PTZ_PARAM_START,
+    PTZ_PARAM_STOP,
+    PTZ_STOP_VALUE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +32,7 @@ SERVICE_REFRESH_PARAMETERS = "refresh_parameters"
 SERVICE_DEBUG_API_STATUS = "debug_api_status"
 SERVICE_GET_COORDINATOR_INFO = "get_coordinator_info"
 SERVICE_CLEAR_CACHE = "clear_cache"
+SERVICE_PTZ = "ptz"
 
 # Service schemas
 SET_PARAMETER_SCHEMA = vol.Schema(
@@ -50,9 +62,35 @@ REFRESH_PARAMETERS_SCHEMA = vol.Schema(
     }
 )
 
+PTZ_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_name"): cv.string,
+        vol.Required("direction"): vol.In(sorted(PTZ_DIRECTIONS)),
+        vol.Optional("duration", default=PTZ_DEFAULT_DURATION): vol.All(
+            vol.Coerce(float), vol.Range(min=PTZ_MIN_DURATION, max=PTZ_MAX_DURATION)
+        ),
+    }
+)
+
 GET_COORDINATOR_INFO_SCHEMA = vol.Schema({})
 
 CLEAR_CACHE_SCHEMA = vol.Schema({})  # No parameters needed
+
+
+async def _async_find_coordinator(hass: HomeAssistant, device_name: str):
+    """Return the coordinator that knows about ``device_name``, or None."""
+    for entry_id, coord in hass.data[DOMAIN].items():
+        if not hasattr(coord, "client"):
+            continue
+        try:
+            device = await hass.async_add_executor_job(
+                coord.client.find_device_by_name, device_name
+            )
+            if device:
+                return coord
+        except Exception as e:
+            _LOGGER.debug("Error finding device in coordinator %s: %s", entry_id, e)
+    return None
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:
@@ -121,6 +159,63 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 device_name,
                 e,
             )
+
+    async def async_ptz(call: ServiceCall) -> None:
+        """Move a camera: start the motor, wait, then stop it.
+
+        ps/ts/zs are speeds, so the camera keeps moving until it is told to stop
+        (or reaches its end stop). The stop is therefore issued from a `finally`
+        block: if anything goes wrong in between, a camera left turning is a far
+        worse outcome than a failed move.
+        """
+        device_name = call.data["device_name"]
+        direction = call.data["direction"]
+        duration = call.data["duration"]
+
+        coordinator = await _async_find_coordinator(hass, device_name)
+        if not coordinator:
+            _LOGGER.error("Device %s not found in any coordinator", device_name)
+            return
+
+        start_value = json.dumps(PTZ_DIRECTIONS[direction], separators=(",", ":"))
+        _LOGGER.debug(
+            "PTZ %s for %.2fs on %s (%s)",
+            direction,
+            duration,
+            device_name,
+            start_value,
+        )
+
+        started = False
+        try:
+            started = await hass.async_add_executor_job(
+                coordinator.client.set_device_parameter,
+                device_name,
+                PTZ_PARAM_START,
+                start_value,
+            )
+            if not started:
+                _LOGGER.error(
+                    "PTZ %s rejected for %s; the camera has to be awake and "
+                    "streaming for a move to take effect",
+                    direction,
+                    device_name,
+                )
+                return
+            await asyncio.sleep(duration)
+        finally:
+            if started:
+                try:
+                    await hass.async_add_executor_job(
+                        coordinator.client.set_device_parameter,
+                        device_name,
+                        PTZ_PARAM_STOP,
+                        PTZ_STOP_VALUE,
+                    )
+                except Exception as e:  # noqa: BLE001 - never leave it turning
+                    _LOGGER.error(
+                        "Failed to stop PTZ on %s: %s", device_name, e
+                    )
 
     async def async_get_device_info(call: ServiceCall) -> None:
         """Get device information."""
@@ -285,6 +380,13 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN,
+        SERVICE_PTZ,
+        async_ptz,
+        schema=PTZ_SCHEMA,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
         SERVICE_GET_DEVICE_INFO,
         async_get_device_info,
         schema=GET_DEVICE_INFO_SCHEMA,
@@ -324,6 +426,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 async def async_unload_services(hass: HomeAssistant) -> None:
     """Unload services."""
     hass.services.async_remove(DOMAIN, SERVICE_SET_PARAMETER)
+    hass.services.async_remove(DOMAIN, SERVICE_PTZ)
     hass.services.async_remove(DOMAIN, SERVICE_GET_DEVICE_INFO)
     hass.services.async_remove(DOMAIN, SERVICE_REFRESH_DEVICE)
     hass.services.async_remove(DOMAIN, SERVICE_REFRESH_PARAMETERS)

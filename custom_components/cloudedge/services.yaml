@@ -1,3 +1,44 @@
+ptz:
+  name: PTZ move
+  description: >-
+    Move a pan/tilt camera in one direction for a short time. The camera has to
+    be awake and streaming for a move to take effect; on a fixed camera nothing
+    happens. Internally the motor is started, held for the given duration and
+    then stopped, so the distance travelled is set by the duration, not by a
+    step size.
+  fields:
+    device_name:
+      name: Device Name
+      description: The name of the CloudEdge device.
+      required: true
+      selector:
+        text:
+    direction:
+      name: Direction
+      description: Which way to move.
+      required: true
+      selector:
+        select:
+          options:
+            - up
+            - down
+            - left
+            - right
+    duration:
+      name: Duration
+      description: >-
+        How long to keep moving, in seconds. Small values give fine steps; below
+        about 0.1 s the motor may not move at all.
+      required: false
+      default: 0.4
+      selector:
+        number:
+          min: 0.05
+          max: 5
+          step: 0.05
+          unit_of_measurement: s
+          mode: box
+
 set_parameter:
   name: Set Parameter
   description: Set a parameter value for a CloudEdge device.

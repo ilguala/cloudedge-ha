@@ -268,6 +268,40 @@ SENSOR_UNIT_PERCENTAGE = "%"
 SENSOR_UNIT_CELSIUS = "°C"
 SENSOR_UNIT_DECIBEL = "dB"
 
+# --- PTZ ------------------------------------------------------------------
+# PTZ is exposed as two IoT parameters whose value is a JSON *string*:
+#
+#   START_PTZ (807):  {"ps": <pan>, "ts": <tilt>, "zs": <zoom>}
+#   STOP_PTZ  (808):  {}
+#
+# ps/ts/zs are SPEEDS, not offsets: the camera keeps moving until it is told to
+# stop (or until it reaches its end stop), so the distance travelled is decided
+# by how long you wait between the two calls. The values below are the ones the
+# Android app sends; read out of the app and confirmed on real hardware.
+PTZ_PARAM_START = "START_PTZ"
+PTZ_PARAM_STOP = "STOP_PTZ"
+PTZ_STOP_VALUE = "{}"
+
+PTZ_DIRECTIONS = {
+    "up": {"ps": 0, "ts": 20, "zs": 0},
+    "down": {"ps": 0, "ts": -20, "zs": 0},
+    "left": {"ps": -80, "ts": 0, "zs": 0},
+    "right": {"ps": 80, "ts": 0, "zs": 0},
+}
+
+PTZ_ICONS = {
+    "up": "mdi:arrow-up-bold",
+    "down": "mdi:arrow-down-bold",
+    "left": "mdi:arrow-left-bold",
+    "right": "mdi:arrow-right-bold",
+}
+
+# One button press is a short nudge. 0.4s is roughly what a deliberate tap on
+# the app's D-pad produces; below ~0.1s the motor may not move at all.
+PTZ_DEFAULT_DURATION = 0.4
+PTZ_MIN_DURATION = 0.05
+PTZ_MAX_DURATION = 5.0
+
 # --- Meari brand: Cococam (fork-only) --------------------------------------
 # Meari is a white-label platform: the same backend serves several apps, and
 # sourceApp/brand select the brand namespace. Upstream targets the CloudEdge
