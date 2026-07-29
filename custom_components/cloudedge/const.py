@@ -396,6 +396,66 @@ def _install_vvp_quality_override() -> None:
 
 _install_vvp_quality_override()
 
+# --- Dead time around each video window ------------------------------------
+# The quality byte above turned out to do nothing, and the premise it rested on
+# was wrong: this side does not receive ~10 kbps. stream_last_duration is the
+# duration of the whole attempt, not of the video; the media duration hides in
+# stream_last_fps, which is (frames - 1) / media_duration. Recomputed on a
+# pinned-HD session, 280224 bytes arrived over 5.16s of media time inside a
+# 23.19s attempt — about 430 kbps while video actually flows, which is a normal
+# bitrate for this camera.
+#
+# What is wrong is the duty cycle. Per cycle: ~8s of wake and signalling, ~5.5s
+# of video, and then two pure waits. The library sits for
+# _VIDEO_STALL_END_SESSION seconds before admitting the window is over, and this
+# integration then sleeps the reconnect cooldown before trying again. At
+# their original 6s and 8s that is 14 of every 27 seconds spent producing
+# nothing, so roughly four seconds of frozen picture for every second of video —
+# which is what "choppy with huge holes" actually was.
+#
+# Both are exposed rather than hardcoded because the safe floor is not known:
+# the camera rate-limits back-to-back sessions, so shortening the cooldown
+# trades dead time for failed attempts, and where the balance sits depends on
+# the camera and the path.
+#
+# The stall timeout must stay above the library's _KCP_GAP_SKIP_DELAY (2.0s). A
+# single lost KCP segment blocks delivery until the gap skip fires at 2s, so
+# ending the session any earlier would tear down windows that were about to
+# recover — hence the floor below, rather than letting this be set to anything.
+VIDEO_STALL_TIMEOUT_MIN = 2.5
+VIDEO_STALL_TIMEOUT_MAX = 10.0
+VIDEO_STALL_TIMEOUT_DEFAULT = 3.0
+
+RECONNECT_COOLDOWN_MIN = 1.0
+RECONNECT_COOLDOWN_MAX = 15.0
+RECONNECT_COOLDOWN_DEFAULT = 4.0
+
+# stream_bridge reads this on every reconnect, so a change applies immediately
+RECONNECT_COOLDOWN = {"value": RECONNECT_COOLDOWN_DEFAULT}
+
+
+def apply_video_stall_timeout(value: float) -> bool:
+    """Set how long the library waits on a stalled window before giving up."""
+    try:
+        from cloudedge.p2p import p2p_streamer
+    except ImportError:  # requirement not installed yet
+        return False
+
+    if not hasattr(p2p_streamer, "_VIDEO_STALL_END_SESSION"):
+        _LOGGER.error(
+            "Video stall timeout not applied: _VIDEO_STALL_END_SESSION is gone "
+            "from cloudedge.p2p.p2p_streamer"
+        )
+        return False
+
+    # Both call sites read the module attribute from inside their receive loop,
+    # so this also shortens the session that is already running.
+    p2p_streamer._VIDEO_STALL_END_SESSION = float(value)
+    return True
+
+
+apply_video_stall_timeout(VIDEO_STALL_TIMEOUT_DEFAULT)
+
 # --- Meari brand: Cococam (fork-only) --------------------------------------
 # Meari is a white-label platform: the same backend serves several apps, and
 # sourceApp/brand select the brand namespace. Upstream targets the CloudEdge

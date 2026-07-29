@@ -1,7 +1,7 @@
 """
 CloudEdge number platform.
 
-Two tuning knobs, neither of which writes anything to the camera:
+Tuning knobs, none of which writes anything to the camera:
 
 * PTZ step duration, per camera. The protocol fixes the motor speed, so the only
   thing that decides how far a button press moves the camera is how long the
@@ -10,6 +10,8 @@ Two tuning knobs, neither of which writes anything to the camera:
   before waiting for acknowledgements.
 * Live stream quality, per account. The quality byte in the VVP start-live
   packet, which the library never sets, so every session asks for quality 0.
+* Video stall timeout and reconnect cooldown, per account. The two waits that
+  decide what fraction of the wall clock actually carries video.
 """
 from __future__ import annotations
 
@@ -27,11 +29,19 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     KCP_RECEIVE_WINDOW,
+    RECONNECT_COOLDOWN,
+    RECONNECT_COOLDOWN_DEFAULT,
+    RECONNECT_COOLDOWN_MAX,
+    RECONNECT_COOLDOWN_MIN,
     STREAM_QUALITY,
+    VIDEO_STALL_TIMEOUT_DEFAULT,
+    VIDEO_STALL_TIMEOUT_MAX,
+    VIDEO_STALL_TIMEOUT_MIN,
     PTZ_DEFAULT_DURATION,
     PTZ_STEP_MAX,
     PTZ_STEP_MIN,
     PTZ_STEP_STEP,
+    apply_video_stall_timeout,
 )
 
 if TYPE_CHECKING:
@@ -61,6 +71,12 @@ async def async_setup_entry(
     # in the library, shared by every stream.
     entities.append(CloudEdgeKcpWindowNumber(coordinator, config_entry.entry_id))
     entities.append(CloudEdgeStreamQualityNumber(coordinator, config_entry.entry_id))
+    entities.append(
+        CloudEdgeVideoStallTimeoutNumber(coordinator, config_entry.entry_id)
+    )
+    entities.append(
+        CloudEdgeReconnectCooldownNumber(coordinator, config_entry.entry_id)
+    )
 
     async_add_entities(entities)
 
@@ -249,4 +265,115 @@ class CloudEdgeStreamQualityNumber(CoordinatorEntity, RestoreEntity, NumberEntit
         self._value = value
         STREAM_QUALITY["value"] = int(value)
         _LOGGER.debug("VVP start-live quality set to %s", int(value))
+        self.async_write_ha_state()
+
+
+class CloudEdgeVideoStallTimeoutNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
+    """How long a stalled live window is given before the session is torn down.
+
+    A live window ends without warning: the camera simply stops sending, and the
+    only way to tell is that no frame has arrived for a while. Waiting longer
+    than necessary to conclude that costs dead time on every single window, and
+    dead time is the dominant term in how choppy the stream looks.
+
+    The floor is above the library's KCP gap-skip delay on purpose: a lost
+    segment blocks delivery for two seconds before the skip unblocks it, so a
+    shorter timeout would tear down windows that were about to recover.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = VIDEO_STALL_TIMEOUT_MIN
+    _attr_native_max_value = VIDEO_STALL_TIMEOUT_MAX
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-sand"
+    _attr_name = "CloudEdge video stall timeout"
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        """Initialize the stall timeout knob."""
+        super().__init__(coordinator)
+        self._value = VIDEO_STALL_TIMEOUT_DEFAULT
+        self._attr_unique_id = f"{entry_id}_video_stall_timeout"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the tuned value and apply it to the library."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            try:
+                self._value = min(
+                    VIDEO_STALL_TIMEOUT_MAX,
+                    max(VIDEO_STALL_TIMEOUT_MIN, float(last_state.state)),
+                )
+            except (TypeError, ValueError):
+                # unknown/unavailable after a restart: keep the default
+                pass
+
+        apply_video_stall_timeout(self._value)
+
+    @property
+    def native_value(self) -> float:
+        """Return the current stall timeout in seconds."""
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store and apply a new stall timeout."""
+        self._value = value
+        apply_video_stall_timeout(value)
+        _LOGGER.debug("Video stall timeout set to %ss", value)
+        self.async_write_ha_state()
+
+
+class CloudEdgeReconnectCooldownNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
+    """How long to wait before opening a fresh live window.
+
+    The camera rate-limits back-to-back sessions: reconnect too soon and the
+    next window produces no video at all, which costs more time than it saves.
+    Eight seconds was measured as always-safe, but that is an upper bound rather
+    than the real limit, and the real limit is what this knob is for.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = RECONNECT_COOLDOWN_MIN
+    _attr_native_max_value = RECONNECT_COOLDOWN_MAX
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-refresh"
+    _attr_name = "CloudEdge reconnect cooldown"
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        """Initialize the reconnect cooldown knob."""
+        super().__init__(coordinator)
+        self._value = RECONNECT_COOLDOWN_DEFAULT
+        self._attr_unique_id = f"{entry_id}_reconnect_cooldown"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the tuned value and publish it for the stream bridge."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            try:
+                self._value = min(
+                    RECONNECT_COOLDOWN_MAX,
+                    max(RECONNECT_COOLDOWN_MIN, float(last_state.state)),
+                )
+            except (TypeError, ValueError):
+                pass
+
+        RECONNECT_COOLDOWN["value"] = self._value
+
+    @property
+    def native_value(self) -> float:
+        """Return the current cooldown in seconds."""
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store and publish a new cooldown."""
+        self._value = value
+        RECONNECT_COOLDOWN["value"] = value
+        _LOGGER.debug("Reconnect cooldown set to %ss", value)
         self.async_write_ha_state()

@@ -20,16 +20,14 @@ import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from .const import RECONNECT_COOLDOWN
+
 if TYPE_CHECKING:
     from . import CloudEdgeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 _IDLE_TIMEOUT = 45.0
-# The camera grants finite ~15-19s live windows and rate-limits immediate
-# re-establishment (a reconnect within ~1-2s gets no video; waiting ~8s makes
-# every window succeed). Pace window-to-window reconnects by this cooldown.
-_RECONNECT_COOLDOWN = 8.0
 _MAX_CONSECUTIVE_STREAM_FAILURES = 4
 # Stop re-feeding the held keyframe after this long without any real video, so a
 # camera that has genuinely gone offline surfaces as a stalled/errored stream
@@ -187,6 +185,10 @@ class CloudEdgeStreamBridge:
         self._last_session_frames = 0
         self._last_session_bytes = 0
         self._last_session_duration = 0.0
+        # Seconds of the attempt that actually carried video. Reported alongside
+        # the attempt duration because the two are easy to confuse, and dividing
+        # the byte count by the wrong one understates the bitrate several-fold.
+        self._last_session_media_duration = 0.0
         self._last_session_fps = 0.0
         self._last_max_frame_gap = 0.0
         self._pacer_fps = _PACER_MAX_FPS
@@ -271,6 +273,9 @@ class CloudEdgeStreamBridge:
                 "stream_last_frames": self._last_session_frames,
                 "stream_last_bytes": self._last_session_bytes,
                 "stream_last_duration": round(self._last_session_duration, 2),
+                "stream_last_media_duration": round(
+                    self._last_session_media_duration, 2
+                ),
                 "stream_last_fps": round(self._last_session_fps, 2),
                 "stream_last_max_gap": round(self._last_max_frame_gap, 2),
                 "stream_pacer_fps": round(self._pacer_fps, 2),
@@ -771,6 +776,7 @@ class CloudEdgeStreamBridge:
             self._last_session_frames = frames
             self._last_session_bytes = total_bytes
             self._last_session_duration = duration
+            self._last_session_media_duration = media_duration
             self._last_session_fps = fps
             self._last_max_frame_gap = max_frame_gap
             if fps > 0:
@@ -1194,7 +1200,10 @@ class CloudEdgeStreamBridge:
                     continue
 
                 # Responsive cooldown: bail early if all consumers disappear.
-                cooldown_until = time.monotonic() + _RECONNECT_COOLDOWN
+                # Read per attempt so the tuning knob applies without a restart.
+                # The camera rate-limits back-to-back windows, so this is a
+                # trade: too short and the next attempt gets no video at all.
+                cooldown_until = time.monotonic() + RECONNECT_COOLDOWN["value"]
                 while time.monotonic() < cooldown_until:
                     if (
                         not self._running
