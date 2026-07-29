@@ -7,8 +7,9 @@ Two tuning knobs, neither of which writes anything to the camera:
   thing that decides how far a button press moves the camera is how long the
   motor is held.
 * KCP receive window, per account. How large a burst a camera may have in flight
-  before waiting for acknowledgements — the setting that decides whether frames
-  arrive whole, and how many of them arrive.
+  before waiting for acknowledgements.
+* Live stream quality, per account. The quality byte in the VVP start-live
+  packet, which the library never sets, so every session asks for quality 0.
 """
 from __future__ import annotations
 
