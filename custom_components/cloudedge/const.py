@@ -263,3 +263,25 @@ SENSOR_DEVICE_CLASS_TEMPERATURE = "temperature"
 SENSOR_UNIT_PERCENTAGE = "%"
 SENSOR_UNIT_CELSIUS = "°C"
 SENSOR_UNIT_DECIBEL = "dB"
+
+# --- Meari brand: Cococam (fork-only) --------------------------------------
+# Meari is a white-label platform: the same backend serves several apps, and
+# sourceApp/brand select the brand namespace. Upstream targets the CloudEdge
+# brand (sourceApp=8, brand=77), and a Cococam account is rejected there with
+# resultCode 1017. The values below were read from the com.cococam.cam 6.1.1
+# APK and confirmed against the app's own runtime logs.
+#
+# This has to run before any CloudEdgeClient call. const.py is imported by
+# both __init__.py and config_flow.py, so it is the earliest common point and
+# covers the login performed during the config flow as well.
+try:
+    from cloudedge import constants as _meari_constants
+except ImportError:  # requirement not installed yet — nothing to override
+    pass
+else:
+    _meari_constants.SOURCE_APP = "82"
+    _meari_constants.APP_VER = "6.1.1"
+    _meari_constants.APP_VER_CODE = "611"
+    _meari_constants.PARTNER_ID = "82"
+    _meari_constants.P2P_BRAND = "82"
+    _meari_constants.P2P_APP_VER = "6.1.1a8.0.0"

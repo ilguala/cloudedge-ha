@@ -1,4 +1,30 @@
-# CloudEdge Home Assistant Integration
+# CloudEdge Home Assistant Integration — Cococam fork
+
+> ### About this fork
+>
+> This is a fork of [fradaloisio/cloudedge-ha](https://github.com/fradaloisio/cloudedge-ha)
+> adapted for **COCOCAM** cameras. All the credit for the integration belongs to
+> the upstream author; this fork only changes which Meari brand it talks to.
+>
+> Meari is a white-label platform: the same backend serves several apps, and a
+> `sourceApp` / `brand` pair selects the brand namespace. Upstream targets
+> CloudEdge (`sourceApp=8`, `brand=77`), so a Cococam account is rejected at
+> login with `resultCode 1017`. This fork sets `sourceApp=82` / `brand=82`
+> (values read from the `com.cococam.cam` 6.1.1 APK and confirmed against the
+> app's runtime logs) and pulls a patched
+> [pycloudedge](https://github.com/ilguala/pycloudedge/tree/cococam) that makes
+> those parameters overridable rather than hardcoded.
+>
+> Verified on two battery cameras: login, device list, waking a dormant camera
+> and live H.264 video, including from a shared (guest) account.
+>
+> Video currently flows through the vendor's TURN relay. The patched library
+> also fixes a bug that made LAN-direct mode impossible (a hardcoded local
+> port was advertised to the camera), but selecting the direct candidate needs
+> further work upstream, and LAN mode is only relevant when Home Assistant
+> sits on the same network as the camera.
+>
+> If the brand parameters land upstream, this fork becomes unnecessary.
 
 An Home Assistant integration for CloudEdge cameras. This integration provides control and monitoring of your CloudEdge devices through Home Assistant.
 The primary purpose of this integration is to enable **automation control** for your CloudEdge cameras. By integrating with Home Assistant, you can create powerful automations to manage your cameras based on your automations and routines such as automatically enable **motion detection** when the "Away from Home" mode is activated or nobody is detected at home.
