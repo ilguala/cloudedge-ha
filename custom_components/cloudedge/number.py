@@ -1,10 +1,14 @@
 """
 CloudEdge number platform.
 
-Exposes how far one PTZ button press moves a camera. The protocol fixes the
-motor speed, so the only thing that decides the distance is how long the motor
-is held — which makes this a per-camera step-size knob rather than a device
-setting: nothing is written to the camera when it changes.
+Two tuning knobs, neither of which writes anything to the camera:
+
+* PTZ step duration, per camera. The protocol fixes the motor speed, so the only
+  thing that decides how far a button press moves the camera is how long the
+  motor is held.
+* KCP receive window, per account. How large a burst a camera may have in flight
+  before waiting for acknowledgements — the setting that decides whether frames
+  arrive whole, and how many of them arrive.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
+    KCP_RECEIVE_WINDOW,
     PTZ_DEFAULT_DURATION,
     PTZ_STEP_MAX,
     PTZ_STEP_MIN,
@@ -45,10 +50,16 @@ async def async_setup_entry(
         _LOGGER.warning("No devices found for number setup")
         return
 
-    async_add_entities(
+    entities: list[NumberEntity] = [
         CloudEdgePtzStepNumber(coordinator, device_sn, device_data)
         for device_sn, device_data in coordinator.data.items()
-    )
+    ]
+
+    # One per account, not per camera: the KCP window is a module-level setting
+    # in the library, shared by every stream.
+    entities.append(CloudEdgeKcpWindowNumber(coordinator, config_entry.entry_id))
+
+    async_add_entities(entities)
 
 
 class CloudEdgePtzStepNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
@@ -115,3 +126,73 @@ class CloudEdgePtzStepNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
             "model": self._device_data.get("type", "SmartEye Camera"),
             "serial_number": self._device_sn,
         }
+
+
+class CloudEdgeKcpWindowNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
+    """KCP receive window advertised to the cameras.
+
+    This is the size of the burst a camera is allowed to have in flight before
+    waiting for acknowledgements. Too large and it floods this side, the socket
+    drops the surplus and frames arrive mangled; too small and it throttles the
+    camera down to a couple of frames per second. The right value depends on the
+    path (LAN vs the vendor's relay) and on how fast the host keeps up, so it is
+    exposed rather than hardcoded.
+
+    Takes effect on the next stream session, not on the one already running.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 32
+    _attr_native_max_value = 4096
+    _attr_native_step = 32
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:tune-variant"
+    _attr_name = "CloudEdge KCP receive window"
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        """Initialize the KCP window knob."""
+        super().__init__(coordinator)
+        self._value = float(KCP_RECEIVE_WINDOW)
+        self._attr_unique_id = f"{entry_id}_kcp_receive_window"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the tuned value and apply it to the library."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            try:
+                self._value = min(4096.0, max(32.0, float(last_state.state)))
+            except (TypeError, ValueError):
+                pass
+
+        self._apply(self._value)
+
+    def _apply(self, value: float) -> None:
+        """Write the window into the library, if it still lives there."""
+        try:
+            from cloudedge.p2p import kcp_tunnel
+        except ImportError:
+            _LOGGER.error("Cannot apply KCP window: library not importable")
+            return
+
+        if not hasattr(kcp_tunnel, "KCP_WND"):
+            _LOGGER.error(
+                "Cannot apply KCP window: KCP_WND is gone from "
+                "cloudedge.p2p.kcp_tunnel"
+            )
+            return
+
+        kcp_tunnel.KCP_WND = int(value)
+        _LOGGER.debug("KCP receive window set to %s", int(value))
+
+    @property
+    def native_value(self) -> float:
+        """Return the current window size in segments."""
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store and apply a new window size."""
+        self._value = value
+        self._apply(value)
+        self.async_write_ha_state()
