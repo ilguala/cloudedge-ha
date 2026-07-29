@@ -36,6 +36,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.CAMERA,
+    Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
@@ -153,6 +154,9 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
         self._authenticated = False
         self._setup_complete = False
         self._last_updated_device = None  # Track which device was last updated
+        # How long a single PTZ button press moves each camera, in seconds,
+        # keyed by serial. Written by the number entity, read by the buttons.
+        self.ptz_step_duration: dict[str, float] = {}
         self._mqtt_listener = None
         self._stream_manager = CloudEdgeStreamManager(self)
         

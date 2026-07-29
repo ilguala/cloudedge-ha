@@ -296,9 +296,17 @@ PTZ_ICONS = {
     "right": "mdi:arrow-right-bold",
 }
 
-# One button press is a short nudge. 0.4s is roughly what a deliberate tap on
-# the app's D-pad produces; below ~0.1s the motor may not move at all.
-PTZ_DEFAULT_DURATION = 0.4
+# A button press is meant to be a small correction, so the default step is
+# deliberately short: at pan speed 80 the full sweep takes roughly 4 seconds,
+# which makes 0.4s about a tenth of the travel -- far too coarse for framing.
+# Below ~0.05s the motor may not move at all. The step is exposed as a number
+# entity per camera so it can be tuned from the UI without touching this file.
+PTZ_DEFAULT_DURATION = 0.15
+PTZ_STEP_MIN = 0.05
+PTZ_STEP_MAX = 2.0
+PTZ_STEP_STEP = 0.05
+
+# The service allows longer moves than a button step.
 PTZ_MIN_DURATION = 0.05
 PTZ_MAX_DURATION = 5.0
 

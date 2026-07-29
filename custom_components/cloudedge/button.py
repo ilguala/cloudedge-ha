@@ -203,9 +203,14 @@ class CloudEdgePtzButton(CoordinatorEntity, ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        """Move the camera for the default nudge duration."""
+        """Move the camera for the step duration configured for it."""
+        # the per-camera knob (number entity); falls back to the default if the
+        # number platform has not finished setting up yet
+        duration = self.coordinator.ptz_step_duration.get(
+            self._device_sn, PTZ_DEFAULT_DURATION
+        )
         _LOGGER.debug(
-            f"PTZ {self._direction} nudge on {self._device_name}"
+            f"PTZ {self._direction} nudge on {self._device_name} for {duration}s"
         )
         try:
             # blocking: the service holds the motor for the nudge duration and
@@ -217,7 +222,7 @@ class CloudEdgePtzButton(CoordinatorEntity, ButtonEntity):
                 {
                     "device_name": self._device_name,
                     "direction": self._direction,
-                    "duration": PTZ_DEFAULT_DURATION,
+                    "duration": duration,
                 },
                 blocking=True,
             )
