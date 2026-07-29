@@ -26,6 +26,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DOMAIN,
     KCP_RECEIVE_WINDOW,
+    STREAM_QUALITY,
     PTZ_DEFAULT_DURATION,
     PTZ_STEP_MAX,
     PTZ_STEP_MIN,
@@ -58,6 +59,7 @@ async def async_setup_entry(
     # One per account, not per camera: the KCP window is a module-level setting
     # in the library, shared by every stream.
     entities.append(CloudEdgeKcpWindowNumber(coordinator, config_entry.entry_id))
+    entities.append(CloudEdgeStreamQualityNumber(coordinator, config_entry.entry_id))
 
     async_add_entities(entities)
 
@@ -195,4 +197,55 @@ class CloudEdgeKcpWindowNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
         """Store and apply a new window size."""
         self._value = value
         self._apply(value)
+        self.async_write_ha_state()
+
+
+class CloudEdgeStreamQualityNumber(CoordinatorEntity, RestoreEntity, NumberEntity):
+    """Quality requested in the VVP start-live packet.
+
+    The library never sets this byte, so every session asks the camera for
+    quality 0 and gets roughly 10 kbps, where the vendor app pulls about 1 Mbps
+    from the same camera. The meaning of the values is not documented anywhere:
+    they have to be tried, which is why this is a knob and not a constant.
+
+    Takes effect on the next stream session.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 0
+    _attr_native_max_value = 3
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:video-high-definition"
+    _attr_name = "CloudEdge stream quality"
+
+    def __init__(self, coordinator, entry_id: str) -> None:
+        """Initialize the stream quality knob."""
+        super().__init__(coordinator)
+        self._value = float(STREAM_QUALITY["value"])
+        self._attr_unique_id = f"{entry_id}_stream_quality"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the chosen value and apply it."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            try:
+                self._value = min(3.0, max(0.0, float(last_state.state)))
+            except (TypeError, ValueError):
+                pass
+
+        STREAM_QUALITY["value"] = int(self._value)
+
+    @property
+    def native_value(self) -> float:
+        """Return the quality value currently requested."""
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store and apply a new quality value."""
+        self._value = value
+        STREAM_QUALITY["value"] = int(value)
+        _LOGGER.debug("VVP start-live quality set to %s", int(value))
         self.async_write_ha_state()

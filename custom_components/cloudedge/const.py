@@ -327,10 +327,74 @@ PTZ_MAX_DURATION = 5.0
 # prevent precisely that. A window of 128 segments is about a second of data in
 # flight at the observed bitrate.
 #
-# If the loss ratio does not move with this, the hypothesis is wrong and the loss
-# is on the relay path (or the camera is not retransmitting), so this override
-# should be reverted rather than tuned further.
-KCP_RECEIVE_WINDOW = 128
+# Outcome of that experiment: 128 raised the average frame from 419 to 8140
+# bytes, but dropped the rate to 2.7 frames per second with 4.6s gaps, and 256
+# and 512 were no better than the original. The reading of "419 bytes = mangled
+# fragment" was wrong: 419 bytes is an ordinary P-frame in a static scene, and
+# the 8140-byte average at 128 was mostly keyframes with the P-frames in between
+# lost. So the window was not the problem and the default is restored; the knob
+# stays exposed because it is genuinely path-dependent.
+KCP_RECEIVE_WINDOW = 4096
+
+# --- Live stream quality ---------------------------------------------------
+# The real gap is bitrate, not packet loss: this side receives ~10 kbps where the
+# vendor app pulls ~1 Mbps from the same camera over the same relay. The VVP
+# start-live packet carries a quality byte at offset 0x3A which the library never
+# sets, so every session asks for quality 0.
+#
+# build_vvp_packet is looked up as a module global at call time, so replacing it
+# is enough — no patched library release needed. Only START_LIVE is touched;
+# every other command keeps whatever the caller passed.
+STREAM_QUALITY = {"value": 0}
+
+
+def _install_vvp_quality_override() -> None:
+    """Make the VVP start-live packet carry a configurable quality byte."""
+    try:
+        from cloudedge.p2p import p2p_streamer
+    except ImportError:  # requirement not installed yet
+        return
+
+    original = getattr(p2p_streamer, "build_vvp_packet", None)
+    if original is None:
+        _LOGGER.error(
+            "Stream quality override not applied: build_vvp_packet is gone "
+            "from cloudedge.p2p.p2p_streamer"
+        )
+        return
+    if getattr(original, "_cloudedge_quality_override", False):
+        return  # already installed (const.py imported more than once)
+
+    def build_vvp_packet(
+        cmd,
+        seq,
+        host_key,
+        param=8,
+        channel=0,
+        video_id=0,
+        quality=0,
+        licence_id=None,
+        auth_flag=0,
+    ):
+        if cmd == p2p_streamer.VVP_CMD_START_LIVE:
+            quality = STREAM_QUALITY["value"]
+        return original(
+            cmd,
+            seq,
+            host_key,
+            param=param,
+            channel=channel,
+            video_id=video_id,
+            quality=quality,
+            licence_id=licence_id,
+            auth_flag=auth_flag,
+        )
+
+    build_vvp_packet._cloudedge_quality_override = True
+    p2p_streamer.build_vvp_packet = build_vvp_packet
+
+
+_install_vvp_quality_override()
 
 # --- Meari brand: Cococam (fork-only) --------------------------------------
 # Meari is a white-label platform: the same backend serves several apps, and
