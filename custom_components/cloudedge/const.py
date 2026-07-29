@@ -310,6 +310,28 @@ PTZ_STEP_STEP = 0.05
 PTZ_MIN_DURATION = 0.05
 PTZ_MAX_DURATION = 5.0
 
+# --- KCP receive window ----------------------------------------------------
+# The library advertises a 4096-segment receive window, with the comment "large
+# to avoid flow control throttle". Measured on a relayed stream, a quarter of the
+# segments never arrive:
+#
+#   KCP skipped gaps: sn 78->270 (48 missing), buf=0, queued=137
+#
+# and the reassembler then waits 2s for retransmissions before skipping ahead,
+# which is exactly the 2s freezes and the mangled ~400-byte frames seen in the
+# camera stream attributes.
+#
+# Hypothesis being tested: the loss is self-inflicted. Advertising a window that
+# large invites the camera to send bursts faster than this side can drain them,
+# and the socket drops the surplus — flow control is the mechanism meant to
+# prevent precisely that. A window of 128 segments is about a second of data in
+# flight at the observed bitrate.
+#
+# If the loss ratio does not move with this, the hypothesis is wrong and the loss
+# is on the relay path (or the camera is not retransmitting), so this override
+# should be reverted rather than tuned further.
+KCP_RECEIVE_WINDOW = 128
+
 # --- Meari brand: Cococam (fork-only) --------------------------------------
 # Meari is a white-label platform: the same backend serves several apps, and
 # sourceApp/brand select the brand namespace. Upstream targets the CloudEdge
@@ -339,6 +361,26 @@ _MEARI_BRAND_PARAMETERS = (
     ("p2pBrand", ("P2P_BRAND",), "82"),
     ("p2pAppVersion", ("P2P_APP_VER",), "6.1.1a8.0.0"),
 )
+
+try:
+    from cloudedge.p2p import kcp_tunnel as _kcp_tunnel
+except ImportError:  # requirement not installed yet — nothing to override
+    pass
+else:
+    # every call site reads this module attribute at call time, so overriding it
+    # here is enough; no patched library release needed
+    if hasattr(_kcp_tunnel, "KCP_WND"):
+        _LOGGER.debug(
+            "KCP receive window: %s -> %s",
+            _kcp_tunnel.KCP_WND,
+            KCP_RECEIVE_WINDOW,
+        )
+        _kcp_tunnel.KCP_WND = KCP_RECEIVE_WINDOW
+    else:
+        _LOGGER.error(
+            "KCP receive window not applied: KCP_WND is gone from "
+            "cloudedge.p2p.kcp_tunnel"
+        )
 
 try:
     from cloudedge import constants as _meari_constants
