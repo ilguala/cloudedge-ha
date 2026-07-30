@@ -1,13 +1,13 @@
 {
   "domain": "cloudedge",
   "name": "CloudEdge (Cococam fork)",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "documentation": "https://github.com/ilguala/cloudedge-ha",
   "issue_tracker": "https://github.com/ilguala/cloudedge-ha/issues",
   "dependencies": ["stream"],
   "codeowners": ["@fradaloisio", "@ilguala"],
   "requirements": [
-    "pycloudedge @ https://github.com/ilguala/pycloudedge/archive/7920874b76bf1b0df70de0e1d87ecf8b16ad709b.zip",
+    "pycloudedge @ https://github.com/ilguala/pycloudedge/archive/refs/tags/v0.2.0.zip",
     "paho-mqtt>=2.0.0",
     "pycryptodome>=3.15.0"
   ],
