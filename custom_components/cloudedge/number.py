@@ -221,9 +221,11 @@ class CloudEdgeStreamQualityNumber(CoordinatorEntity, RestoreEntity, NumberEntit
     """Quality requested in the VVP start-live packet.
 
     The library never sets this byte, so every session asks the camera for
-    quality 0 and gets roughly 10 kbps, where the vendor app pulls about 1 Mbps
-    from the same camera. The meaning of the values is not documented anywhere:
-    they have to be tried, which is why this is a knob and not a constant.
+    quality 0. Changing it makes no measurable difference - 0 and 1 came out
+    within session noise of each other on a pinned HD profile - and it is kept
+    only because the values are undocumented and one of them may yet turn out
+    to mean something. The poor stream it was meant to explain had a different
+    cause entirely; see the note in const.py.
 
     Takes effect on the next stream session.
     """

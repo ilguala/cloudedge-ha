@@ -337,10 +337,18 @@ PTZ_MAX_DURATION = 5.0
 KCP_RECEIVE_WINDOW = 4096
 
 # --- Live stream quality ---------------------------------------------------
-# The real gap is bitrate, not packet loss: this side receives ~10 kbps where the
-# vendor app pulls ~1 Mbps from the same camera over the same relay. The VVP
-# start-live packet carries a quality byte at offset 0x3A which the library never
-# sets, so every session asks for quality 0.
+# This knob does nothing measurable and is kept only because the values are
+# undocumented and someone may yet find one that matters. Pinned HD, quality 0
+# gave 12.1 KB/s and quality 1 gave 13.4 KB/s, which is session-to-session
+# noise.
+#
+# It was added on the theory that the gap was bitrate, and that theory was
+# wrong twice over. The "~10 kbps" it was built on came from dividing the video
+# bytes by the whole attempt duration instead of by the media duration, and the
+# real cause of the poor stream was neither bitrate nor the quality byte: the
+# KCP receive path was dropping every segment that followed the first one in a
+# datagram, which manufactured the packet loss it then failed to repair. Fixed
+# in the library; see the multi-segment walk in kcp_tunnel.process_input.
 #
 # build_vvp_packet is looked up as a module global at call time, so replacing it
 # is enough — no patched library release needed. Only START_LIVE is touched;
