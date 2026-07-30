@@ -310,100 +310,6 @@ PTZ_STEP_STEP = 0.05
 PTZ_MIN_DURATION = 0.05
 PTZ_MAX_DURATION = 5.0
 
-# --- KCP receive window ----------------------------------------------------
-# The library advertises a 4096-segment receive window, with the comment "large
-# to avoid flow control throttle". Measured on a relayed stream, a quarter of the
-# segments never arrive:
-#
-#   KCP skipped gaps: sn 78->270 (48 missing), buf=0, queued=137
-#
-# and the reassembler then waits 2s for retransmissions before skipping ahead,
-# which is exactly the 2s freezes and the mangled ~400-byte frames seen in the
-# camera stream attributes.
-#
-# Hypothesis being tested: the loss is self-inflicted. Advertising a window that
-# large invites the camera to send bursts faster than this side can drain them,
-# and the socket drops the surplus — flow control is the mechanism meant to
-# prevent precisely that. A window of 128 segments is about a second of data in
-# flight at the observed bitrate.
-#
-# Outcome of that experiment: 128 raised the average frame from 419 to 8140
-# bytes, but dropped the rate to 2.7 frames per second with 4.6s gaps, and 256
-# and 512 were no better than the original. The reading of "419 bytes = mangled
-# fragment" was wrong: 419 bytes is an ordinary P-frame in a static scene, and
-# the 8140-byte average at 128 was mostly keyframes with the P-frames in between
-# lost. So the window was not the problem and the default is restored; the knob
-# stays exposed because it is genuinely path-dependent.
-KCP_RECEIVE_WINDOW = 4096
-
-# --- Live stream quality ---------------------------------------------------
-# This knob does nothing measurable and is kept only because the values are
-# undocumented and someone may yet find one that matters. Pinned HD, quality 0
-# gave 12.1 KB/s and quality 1 gave 13.4 KB/s, which is session-to-session
-# noise.
-#
-# It was added on the theory that the gap was bitrate, and that theory was
-# wrong twice over. The "~10 kbps" it was built on came from dividing the video
-# bytes by the whole attempt duration instead of by the media duration, and the
-# real cause of the poor stream was neither bitrate nor the quality byte: the
-# KCP receive path was dropping every segment that followed the first one in a
-# datagram, which manufactured the packet loss it then failed to repair. Fixed
-# in the library; see the multi-segment walk in kcp_tunnel.process_input.
-#
-# build_vvp_packet is looked up as a module global at call time, so replacing it
-# is enough — no patched library release needed. Only START_LIVE is touched;
-# every other command keeps whatever the caller passed.
-STREAM_QUALITY = {"value": 0}
-
-
-def _install_vvp_quality_override() -> None:
-    """Make the VVP start-live packet carry a configurable quality byte."""
-    try:
-        from cloudedge.p2p import p2p_streamer
-    except ImportError:  # requirement not installed yet
-        return
-
-    original = getattr(p2p_streamer, "build_vvp_packet", None)
-    if original is None:
-        _LOGGER.error(
-            "Stream quality override not applied: build_vvp_packet is gone "
-            "from cloudedge.p2p.p2p_streamer"
-        )
-        return
-    if getattr(original, "_cloudedge_quality_override", False):
-        return  # already installed (const.py imported more than once)
-
-    def build_vvp_packet(
-        cmd,
-        seq,
-        host_key,
-        param=8,
-        channel=0,
-        video_id=0,
-        quality=0,
-        licence_id=None,
-        auth_flag=0,
-    ):
-        if cmd == p2p_streamer.VVP_CMD_START_LIVE:
-            quality = STREAM_QUALITY["value"]
-        return original(
-            cmd,
-            seq,
-            host_key,
-            param=param,
-            channel=channel,
-            video_id=video_id,
-            quality=quality,
-            licence_id=licence_id,
-            auth_flag=auth_flag,
-        )
-
-    build_vvp_packet._cloudedge_quality_override = True
-    p2p_streamer.build_vvp_packet = build_vvp_packet
-
-
-_install_vvp_quality_override()
-
 # --- Dead time around each video window ------------------------------------
 # The quality byte above turned out to do nothing, and the premise it rested on
 # was wrong: this side does not receive ~10 kbps. stream_last_duration is the
@@ -493,26 +399,6 @@ _MEARI_BRAND_PARAMETERS = (
     ("p2pBrand", ("P2P_BRAND",), "82"),
     ("p2pAppVersion", ("P2P_APP_VER",), "6.1.1a8.0.0"),
 )
-
-try:
-    from cloudedge.p2p import kcp_tunnel as _kcp_tunnel
-except ImportError:  # requirement not installed yet — nothing to override
-    pass
-else:
-    # every call site reads this module attribute at call time, so overriding it
-    # here is enough; no patched library release needed
-    if hasattr(_kcp_tunnel, "KCP_WND"):
-        _LOGGER.debug(
-            "KCP receive window: %s -> %s",
-            _kcp_tunnel.KCP_WND,
-            KCP_RECEIVE_WINDOW,
-        )
-        _kcp_tunnel.KCP_WND = KCP_RECEIVE_WINDOW
-    else:
-        _LOGGER.error(
-            "KCP receive window not applied: KCP_WND is gone from "
-            "cloudedge.p2p.kcp_tunnel"
-        )
 
 try:
     from cloudedge import constants as _meari_constants
