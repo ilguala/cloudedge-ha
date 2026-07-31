@@ -29,6 +29,7 @@ from .const import (
     CONF_BRAND,
     DEFAULT_BRAND,
     resolve_brand,
+    account_unique_id,
 )
 from .services import async_setup_services, async_unload_services
 from .stream_bridge import CloudEdgeStreamManager
@@ -56,6 +57,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     country_code = entry.data[CONF_COUNTRY_CODE]
     phone_code = entry.data[CONF_PHONE_CODE]
     refresh_interval = entry.data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
+
+    # Entries created before the brand selector are keyed on the email alone,
+    # which cannot tell the same address on two brands apart. Re-key them so
+    # duplicate detection keeps working for entries created either side of the
+    # change; this touches only the registry, nothing the user can see.
+    brand_name = (
+        entry.data.get(CONF_BRAND) or entry.options.get(CONF_BRAND) or DEFAULT_BRAND
+    )
+    expected_unique_id = account_unique_id(username, brand_name)
+    if entry.unique_id != expected_unique_id:
+        _LOGGER.debug(
+            "Migrating config entry unique_id from %r to %r",
+            entry.unique_id,
+            expected_unique_id,
+        )
+        hass.config_entries.async_update_entry(entry, unique_id=expected_unique_id)
 
     # Create coordinator
     coordinator = CloudEdgeCoordinator(

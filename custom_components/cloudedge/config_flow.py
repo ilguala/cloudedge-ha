@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_BRAND,
     BRAND_PROFILE_NAMES,
     resolve_brand,
+    account_unique_id,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,8 +144,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 info = await validate_input(self.hass, user_input)
                 
-                # Check if already configured
-                await self.async_set_unique_id(user_input[CONF_USERNAME])
+                # Keyed on (brand, address): the same address on two brands is
+                # two different accounts. See account_unique_id().
+                await self.async_set_unique_id(
+                    account_unique_id(
+                        user_input[CONF_USERNAME],
+                        user_input.get(CONF_BRAND, DEFAULT_BRAND),
+                    )
+                )
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(title=info["title"], data=user_input)
@@ -189,7 +196,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await validate_input(self.hass, user_input)
                 
                 # Update the existing config entry
-                existing_entry = await self.async_set_unique_id(user_input[CONF_USERNAME])
+                existing_entry = await self.async_set_unique_id(
+                    account_unique_id(
+                        user_input[CONF_USERNAME],
+                        user_input.get(CONF_BRAND, DEFAULT_BRAND),
+                    )
+                )
                 if existing_entry:
                     self.hass.config_entries.async_update_entry(
                         existing_entry, data=user_input

@@ -444,6 +444,24 @@ else:
 BRAND_PROFILE_NAMES = ("cococam", "iegeek", "cloudedge")
 
 
+def account_unique_id(username: str, brand_name: str) -> str:
+    """The identity of an account, which is (address, brand) and not the address.
+
+    The same email registered in the CloudEdge app and in the ieGeek app is two
+    *distinct* accounts: each brand is its own namespace on Meari's backend, with
+    its own device list and its own sharing. Keying a config entry on the address
+    alone therefore makes Home Assistant reject the second one as "already
+    configured" -- which is exactly the setup somebody with cameras from two
+    brands needs, and the reason the brand selector was not enough on its own.
+
+    The address is lowercased because mail is case-insensitive: two entries
+    differing only in case would be one account holding two sessions, and on this
+    platform a second session logs the first one out.
+    """
+    brand = (brand_name or DEFAULT_BRAND).strip().lower()
+    return f"{brand}:{(username or '').strip().lower()}"
+
+
 def resolve_brand(name: str):
     """Return the pycloudedge Brand for a profile name.
 
