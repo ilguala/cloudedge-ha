@@ -9,7 +9,11 @@
           "password": "Password",
           "country_code": "Country Code",
           "phone_code": "Phone Code",
-          "refresh_interval": "Refresh Interval (minutes)"
+          "refresh_interval": "Refresh Interval (minutes)",
+          "brand": "Camera brand / app"
+        },
+        "data_description": {
+          "brand": "Must match the app the cameras were paired with. It selects the vendor namespace server-side, so the wrong value fails the login with an error that looks like a wrong password."
         }
       },
       "reauth_confirm": {

@@ -26,6 +26,9 @@ from .const import (
     CONF_PHONE_CODE,
     CONF_REFRESH_INTERVAL,
     DEFAULT_REFRESH_INTERVAL,
+    CONF_BRAND,
+    DEFAULT_BRAND,
+    resolve_brand,
 )
 from .services import async_setup_services, async_unload_services
 from .stream_bridge import CloudEdgeStreamManager
@@ -150,6 +153,21 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
         self.country_code = country_code
         self.phone_code = phone_code
         self.config_entry = config_entry
+        # Which vendor namespace this account belongs to. Entries created before
+        # the selector existed carry no value and are Cococam by definition.
+        self.brand_name = DEFAULT_BRAND
+        if config_entry is not None:
+            self.brand_name = (
+                config_entry.data.get(CONF_BRAND)
+                or config_entry.options.get(CONF_BRAND)
+                or DEFAULT_BRAND
+            )
+        # None when the installed library predates per-client brands; in that case
+        # the module-level override in const.py still supplies the values.
+        self.brand = resolve_brand(self.brand_name)
+        # Passed through only when we actually have one: an older library's
+        # CloudEdgeClient has no brand argument and would raise TypeError.
+        self._brand_kwargs = {"brand": self.brand} if self.brand is not None else {}
         self.client = None
         self._authenticated = False
         self._setup_complete = False
@@ -199,6 +217,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                     phone_code=self.phone_code,
                     debug=True,  # Enable debug logging
                     session_cache_file=self._session_cache_path(),
+                    **self._brand_kwargs,
                 )
 
             # Check if we have valid session data
@@ -499,6 +518,7 @@ class CloudEdgeCoordinator(DataUpdateCoordinator):
                     phone_code=self.phone_code,
                     debug=True,  # Enable debug logging
                     session_cache_file=self._session_cache_path(),
+                    **self._brand_kwargs,
                 )
 
             # Always validate and authenticate before making API calls

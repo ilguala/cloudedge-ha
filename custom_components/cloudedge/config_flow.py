@@ -22,6 +22,10 @@ from .const import (
     DEFAULT_COUNTRY_CODE,
     DEFAULT_PHONE_CODE,
     COUNTRY_CODES,
+    CONF_BRAND,
+    DEFAULT_BRAND,
+    BRAND_PROFILE_NAMES,
+    resolve_brand,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +42,13 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_REFRESH_INTERVAL, default=DEFAULT_REFRESH_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=60)
+        ),
+        # Which rebrand of the Meari platform this account belongs to. It has to
+        # match the app the cameras were paired with, because it selects the
+        # vendor namespace server-side: the wrong value fails the login with
+        # resultCode 1017, which looks exactly like a wrong password.
+        vol.Optional(CONF_BRAND, default=DEFAULT_BRAND): vol.In(
+            list(BRAND_PROFILE_NAMES)
         ),
     }
 )
@@ -56,18 +67,25 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     password = data[CONF_PASSWORD]
     country_code = data[CONF_COUNTRY_CODE]
     phone_code = data[CONF_PHONE_CODE]
+    brand_name = data.get(CONF_BRAND, DEFAULT_BRAND)
+    brand = resolve_brand(brand_name)
+    # Only passed when we have one: an older library's client has no such
+    # argument. See resolve_brand().
+    brand_kwargs = {"brand": brand} if brand is not None else {}
 
     try:
         # Create client and test authentication
         _LOGGER.debug("Creating CloudEdge client for %s", username)
         _LOGGER.debug("Country code: %s, Phone code: %s", country_code, phone_code)
-        
+        _LOGGER.debug("Brand profile: %s (%s)", brand_name, brand)
+
         client = CloudEdgeClient(
             username=username,
             password=password,
             country_code=country_code,
             phone_code=phone_code,
             debug=True,  # Enable debug to see API errors
+            **brand_kwargs,
         )
 
         # Test authentication

@@ -9,7 +9,11 @@
           "password": "Password",
           "country_code": "Codice Paese",
           "phone_code": "Prefisso Telefonico",
-          "refresh_interval": "Intervallo di Aggiornamento (minuti)"
+          "refresh_interval": "Intervallo di Aggiornamento (minuti)",
+          "brand": "Marchio / app della camera"
+        },
+        "data_description": {
+          "brand": "Deve corrispondere all'app con cui le camere sono state associate. Seleziona lo spazio del marchio lato server, quindi un valore sbagliato fa fallire il login con un errore che sembra una password errata."
         }
       },
       "reauth_confirm": {

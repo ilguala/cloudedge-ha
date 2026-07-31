@@ -12,11 +12,15 @@ CONF_PASSWORD = "password"
 CONF_COUNTRY_CODE = "country_code"
 CONF_PHONE_CODE = "phone_code"
 CONF_REFRESH_INTERVAL = "refresh_interval"
+CONF_BRAND = "brand"
 
 # Default values
 DEFAULT_REFRESH_INTERVAL = 5  # minutes
 DEFAULT_COUNTRY_CODE = "US"
 DEFAULT_PHONE_CODE = "+1"
+# Existing config entries predate the brand selector and are all Cococam, so
+# that has to stay the default or an upgrade would silently repoint them.
+DEFAULT_BRAND = "cococam"
 
 # Supported country codes and phone codes
 COUNTRY_CODES = {
@@ -418,3 +422,60 @@ else:
                 _label,
                 ", ".join(_candidate_names),
             )
+
+
+# ---------------------------------------------------------------------------
+# Per-entry brand selection
+# ---------------------------------------------------------------------------
+#
+# The override above writes the library's module attributes, which means one
+# brand per Home Assistant process. That was enough while every camera here was
+# a Cococam; it is not enough once an ieGeek account is added alongside, because
+# whichever value was written last would be used for both and one of the two
+# logins would fail with resultCode 1017.
+#
+# So the override stays -- it is what makes an older pycloudedge work at all, and
+# it supplies the default for any client that does not ask for a brand -- and on
+# top of it each config entry names a profile that is handed to its own client.
+#
+# Profiles live in the library (cloudedge.constants.KNOWN_BRANDS) so the values
+# are not duplicated in two repos that can drift apart. Here we only list which
+# ones to offer.
+BRAND_PROFILE_NAMES = ("cococam", "iegeek", "cloudedge")
+
+
+def resolve_brand(name: str):
+    """Return the pycloudedge Brand for a profile name.
+
+    Returns None when the installed library predates per-client brands. That is
+    not an error for a Cococam-only setup: the module-level override above still
+    applies, and the client falls back to it. It does mean a second brand cannot
+    work until the library is updated, which is why it is logged.
+    """
+    try:
+        from cloudedge.constants import KNOWN_BRANDS
+    except ImportError as exc:
+        # Report the actual exception. This except catches anything raised while
+        # importing the library, not only "the attribute is missing" -- during
+        # development a shadowed stdlib module surfaced here and the message sent
+        # the reader looking for a library upgrade that was not the problem.
+        _LOGGER.warning(
+            "Could not read KNOWN_BRANDS from pycloudedge (%s): brand '%s' "
+            "cannot be applied per entry, falling back to the process-wide "
+            "default. If the library is simply older, update it to run two "
+            "brands side by side",
+            exc,
+            name,
+        )
+        return None
+
+    brand = KNOWN_BRANDS.get(name)
+    if brand is None:
+        _LOGGER.error(
+            "Unknown brand profile '%s' (known: %s); falling back to '%s'",
+            name,
+            ", ".join(sorted(KNOWN_BRANDS)),
+            DEFAULT_BRAND,
+        )
+        return KNOWN_BRANDS.get(DEFAULT_BRAND)
+    return brand
