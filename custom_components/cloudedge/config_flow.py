@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
@@ -148,6 +148,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(title=info["title"], data=user_input)
+            except AbortFlow:
+                # Home Assistant's own control flow, raised by
+                # _abort_if_unique_id_configured() and async_set_unique_id():
+                # "already configured", "already in progress". It has to reach
+                # the flow manager to be shown properly. Letting the broad
+                # except below swallow it turns a precise message into a bare
+                # "unknown" and sends the user looking at their password.
+                raise
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -188,7 +196,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                     await self.hass.config_entries.async_reload(existing_entry.entry_id)
                     return self.async_abort(reason="reauth_successful")
-                    
+
+            except AbortFlow:
+                # same reason as in async_step_user: this is Home Assistant
+                # telling the user something specific, not an error to hide
+                raise
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
